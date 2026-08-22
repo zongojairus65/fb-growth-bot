@@ -2,8 +2,9 @@ import os
 from fastapi import FastAPI, HTTPException
 from dotenv import load_dotenv
 
-from models import Profile, QuizAnswer
+from models import Profile, QuizAnswer, DiagnosticRequest
 from core.gemini_client import GeminiClient
+from core.scraper_client import ScraperClient
 from facebook.graph_client import GraphClient
 from core.pipeline import GrowthPipeline
 from onboarding.funnel import SCAN_STEPS, QUIZ_QUESTIONS
@@ -14,11 +15,12 @@ app = FastAPI(title="FB Growth Bot")
 
 gemini = GeminiClient()
 
-graph = GraphClient(
-    page_access_token=os.getenv("FB_PAGE_TOKEN", ""),
-    page_id=os.getenv("FB_PAGE_ID", ""),
-)
-pipeline = GrowthPipeline(gemini, graph)
+try:
+    scraper = ScraperClient()
+except RuntimeError:
+    scraper = None  # le bot fonctionne quand même, mais le mode "username seul" sera indisponible
+
+pipeline = GrowthPipeline(gemini, scraper)
 
 
 @app.get("/onboarding/scan-steps")
@@ -36,23 +38,25 @@ async def submit_quiz_answer(answer: QuizAnswer):
     return {"status": "recu", "question_id": answer.question_id}
 
 
-@app.post("/profile/{profile_id}/resolve-username")
-async def resolve_username(profile_id: int, username: str):
-    data = await graph.resolve_username(username)
-    if not data:
-        raise HTTPException(404, "Compte introuvable ou non public")
-    return data
-
-
-@app.post("/diagnostic/{profile_id}")
-async def diagnostic(profile_id: int, username: str, niche_hint: str = ""):
-    result = await pipeline.run_diagnostic(profile_id, username, niche_hint)
+@app.post("/diagnostic")
+async def diagnostic(req: DiagnosticRequest):
+    """
+    Diagnostic unique, deux chemins possibles selon ce que l'utilisateur fournit :
+    - fb_username seul          -> scraper (rapide, léger, sans connexion, likes/commentaires uniquement)
+    - fb_page_id + fb_page_token -> Graph API (plus riche : impressions/portée réelles, nécessite OAuth)
+    """
+    try:
+        result = await pipeline.run_diagnostic(req)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
     return result
 
 
 @app.get("/projection/{profile_id}")
-async def projection(profile_id: int):
-    return await pipeline.growth_projection(profile_id)
+async def projection(profile_id: int, avg_reach: int = 0):
+    return await pipeline.growth_projection(profile_id, avg_reach)
 
 
 @app.post("/strategy")
@@ -80,12 +84,15 @@ async def refine(contenu: str, voix: str, audience: str, objectif: str):
 
 
 @app.post("/publish/text")
-async def publish_text(message: str):
+async def publish_text(message: str, fb_page_id: str, fb_page_token: str):
+    """Publication : chaque utilisateur fournit SA PROPRE Page + token — jamais une valeur globale."""
+    graph = GraphClient(page_access_token=fb_page_token, page_id=fb_page_id)
     result = await graph.publish_text_post(message)
     return result
 
 
 @app.post("/publish/photo")
-async def publish_photo(image_url: str, caption: str = ""):
+async def publish_photo(image_url: str, fb_page_id: str, fb_page_token: str, caption: str = ""):
+    graph = GraphClient(page_access_token=fb_page_token, page_id=fb_page_id)
     result = await graph.publish_photo_post(image_url, caption)
     return result

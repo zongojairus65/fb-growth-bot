@@ -55,3 +55,12 @@ class EngagementProjection(BaseModel):
     palier_actuel: int         # ex: vues moyennes actuelles
     paliers: list[dict]        # [{"label": "1K", "valeur": 1000}, ...]
     message_motivation: str
+
+
+class DiagnosticRequest(BaseModel):
+    profile_id: int
+    niche_hint: Optional[str] = ""
+    # L'utilisateur fournit SOIT username, SOIT (page_id + page_token) — jamais les deux vides, jamais les deux remplis
+    fb_username: Optional[str] = None
+    fb_page_id: Optional[str] = None
+    fb_page_token: Optional[str] = None

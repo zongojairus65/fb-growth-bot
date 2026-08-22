@@ -1,31 +1,59 @@
 from core.gemini_client import GeminiClient
 from core import prompts
+from core.scraper_client import ScraperClient
 from facebook.graph_client import GraphClient
 from onboarding.funnel import build_projection
-from models import DiagnosticResult, EngagementProjection
+from models import DiagnosticResult, EngagementProjection, DiagnosticRequest
 
 GEMINI_PREMIUM = "gemini-3.5-flash"
 GEMINI_FREE = "gemma-4-31b-it"
 
 
 class GrowthPipeline:
-    def __init__(self, gemini: GeminiClient, graph: GraphClient):
+    def __init__(self, gemini: GeminiClient, scraper: ScraperClient | None = None):
         self.gemini = gemini
-        self.graph = graph
+        self.scraper = scraper
 
-    async def run_diagnostic(self, profile_id: int, username: str, niche_hint: str) -> DiagnosticResult:
-        posts = await self.graph.get_recent_posts_stats()
+    async def run_diagnostic(self, req: DiagnosticRequest) -> DiagnosticResult:
+        """Point d'entrée unique : route automatiquement vers le scraper
+        (username seul) ou vers Graph API (page_id + token fournis)."""
+        has_username = bool(req.fb_username)
+        has_page_creds = bool(req.fb_page_id and req.fb_page_token)
+
+        if has_username and has_page_creds:
+            raise ValueError("Fournis soit un username, soit un couple page_id/token — pas les deux.")
+        if not has_username and not has_page_creds:
+            raise ValueError("Fournis un username OU un couple page_id/token.")
+
+        if has_page_creds:
+            return await self._diagnostic_via_page(req)
+        return await self._diagnostic_via_scraper(req)
+
+    async def _diagnostic_via_scraper(self, req: DiagnosticRequest) -> DiagnosticResult:
+        if not self.scraper:
+            raise RuntimeError("Scraper non configuré (SCRAPER_API_TOKEN manquant)")
+        posts = await self.scraper.fetch_public_profile_posts(req.fb_username)
+        stats_summary = self.scraper.summarize_stats(posts)
+        prompt = prompts.diagnostic_prompt(req.fb_username, req.niche_hint, stats_summary)
+        result = await self.gemini.generate_json(prompt, model=GEMINI_FREE)
+        return DiagnosticResult(profile_id=req.profile_id, raw_stats=stats_summary, **result)
+
+    async def _diagnostic_via_page(self, req: DiagnosticRequest) -> DiagnosticResult:
+        """Instancie un GraphClient à la volée avec LE token de CET utilisateur
+        (jamais une variable d'env globale — chaque utilisateur a le sien)."""
+        graph = GraphClient(page_access_token=req.fb_page_token, page_id=req.fb_page_id)
+        posts = await graph.get_recent_posts_stats()
         stats_summary = {
             "nb_posts_analyses": len(posts),
-            "moyenne_impressions": await self.graph.average_reach(),
+            "moyenne_impressions": await graph.average_reach(),
         }
-        prompt = prompts.diagnostic_prompt(username, niche_hint, stats_summary)
+        label = req.fb_username or req.fb_page_id
+        prompt = prompts.diagnostic_prompt(label, req.niche_hint, stats_summary)
         result = await self.gemini.generate_json(prompt, model=GEMINI_FREE)
-        return DiagnosticResult(profile_id=profile_id, raw_stats=stats_summary, **result)
+        return DiagnosticResult(profile_id=req.profile_id, raw_stats=stats_summary, **result)
 
-    async def growth_projection(self, profile_id: int) -> EngagementProjection:
-        avg = await self.graph.average_reach()
-        projection = build_projection(avg)
+    async def growth_projection(self, profile_id: int, avg_reach: int = 0) -> EngagementProjection:
+        projection = build_projection(avg_reach)
         projection.profile_id = profile_id
         return projection
 
