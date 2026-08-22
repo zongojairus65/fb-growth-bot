@@ -3,7 +3,7 @@ Client pour facebook-scraper3 (RapidAPI) — diagnostic en lecture seule
 sur profils publics, jamais pour la publication.
 
 Endpoints confirmés par test réel :
-- GET /profile/id?url=...                  -> résout un username en profile_id
+- GET /profile/details_url?url=...         -> résout un username en profile_id
 - GET /profile/details_id?profile_id=...   -> bio, catégorie, about_public
 - GET /profile/posts?profile_id=...        -> posts publics (results[].reactions_count, comments_count)
 - GET /profile/reels?reels_profile_id=...  -> reels publics — accepte le même ID numérique
@@ -34,14 +34,18 @@ class ScraperClient:
         }
 
     async def resolve_username_to_id(self, username: str) -> Optional[str]:
-        url = f"{self.base_url}/profile/id"
+        """Endpoint confirmé : /profile/details_url (pas /profile/id).
+        Réponse structurée comme details_id : {"profile": {"profile_id": ...}}
+        — à reconfirmer par test réel si la résolution échoue encore."""
+        url = f"{self.base_url}/profile/details_url"
         params = {"url": f"https://www.facebook.com/{username}"}
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.get(url, headers=self._headers(), params=params)
         if resp.status_code != 200:
             return None
         data = resp.json()
-        return data.get("id") or data.get("profile_id")
+        profile = data.get("profile", data)  # gère les deux formats possibles
+        return profile.get("profile_id") or profile.get("id")
 
     async def fetch_profile_details(self, profile_id: str) -> dict:
         url = f"{self.base_url}/profile/details_id"
@@ -106,7 +110,7 @@ class ScraperClient:
         """Champs confirmés par test réel : intro (bio), influencer_category,
         about_public (liste de tags, dont l'activité/poste du profil).
         Pas de champ 'followers' disponible sur cet endpoint."""
-        profile = details.get("profile", details)  # gère les deux formats (avec/sans clé racine "profile")
+        profile = details.get("profile", details)
         intro = profile.get("intro", "")
         influencer_category = profile.get("influencer_category", "")
         about_tags = [
