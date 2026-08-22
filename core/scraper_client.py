@@ -4,10 +4,10 @@ sur profils publics, jamais pour la publication.
 
 Endpoints confirmés par test réel :
 - GET /profile/id?url=...                  -> résout un username en profile_id
-- GET /profile/details_id?profile_id=...   -> bio, catégorie, followers
+- GET /profile/details_id?profile_id=...   -> bio, catégorie, about_public
 - GET /profile/posts?profile_id=...        -> posts publics (results[].reactions_count, comments_count)
-- GET /profile/reels?reels_profile_id=...  -> reels publics — MÊME format d'ID numérique simple
-                                               que profile_id (confirmé avec reels_profile_id=4)
+- GET /profile/reels?reels_profile_id=...  -> reels publics — accepte le même ID numérique
+                                               simple que profile_id (confirmé avec =4)
 """
 
 import os
@@ -103,7 +103,16 @@ class ScraperClient:
         }
 
     def extract_niche_hint(self, details: dict) -> str:
-        bio = details.get("bio") or details.get("intro") or ""
-        category = details.get("category") or ""
-        parts = [p for p in [category, bio] if p]
+        """Champs confirmés par test réel : intro (bio), influencer_category,
+        about_public (liste de tags, dont l'activité/poste du profil).
+        Pas de champ 'followers' disponible sur cet endpoint."""
+        profile = details.get("profile", details)  # gère les deux formats (avec/sans clé racine "profile")
+        intro = profile.get("intro", "")
+        influencer_category = profile.get("influencer_category", "")
+        about_tags = [
+            item.get("text", "")
+            for item in profile.get("about_public", [])
+            if item.get("text")
+        ]
+        parts = [p for p in [influencer_category, intro, *about_tags] if p]
         return " - ".join(parts) if parts else ""

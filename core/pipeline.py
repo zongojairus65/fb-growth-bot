@@ -15,8 +15,6 @@ class GrowthPipeline:
         self.scraper = scraper
 
     async def run_diagnostic(self, req: DiagnosticRequest) -> DiagnosticResult:
-        """Point d'entrée unique : route automatiquement vers le scraper
-        (username seul) ou vers Graph API (page_id + token fournis)."""
         has_username = bool(req.fb_username)
         has_page_creds = bool(req.fb_page_id and req.fb_page_token)
 
@@ -31,16 +29,28 @@ class GrowthPipeline:
 
     async def _diagnostic_via_scraper(self, req: DiagnosticRequest) -> DiagnosticResult:
         if not self.scraper:
-            raise RuntimeError("Scraper non configuré (SCRAPER_API_TOKEN manquant)")
-        posts = await self.scraper.fetch_public_profile_posts(req.fb_username)
-        stats_summary = self.scraper.summarize_stats(posts)
-        prompt = prompts.diagnostic_prompt(req.fb_username, req.niche_hint, stats_summary)
+            raise RuntimeError("Scraper non configuré (RAPIDAPI_KEY manquant)")
+
+        profile_id = await self.scraper.resolve_username_to_id(req.fb_username)
+        if not profile_id:
+            raise ValueError(f"Impossible de résoudre le profil @{req.fb_username} (privé ou introuvable)")
+
+        details = await self.scraper.fetch_profile_details(profile_id)
+        posts = await self.scraper.fetch_public_profile_posts(profile_id)
+        reels = await self.scraper.fetch_profile_reels(profile_id)
+
+        stats_summary = {
+            **self.scraper.summarize_posts(posts),
+            **self.scraper.summarize_reels(reels),
+        }
+
+        niche_hint = req.niche_hint or self.scraper.extract_niche_hint(details)
+
+        prompt = prompts.diagnostic_prompt(req.fb_username, niche_hint, stats_summary)
         result = await self.gemini.generate_json(prompt, model=GEMINI_FREE)
         return DiagnosticResult(profile_id=req.profile_id, raw_stats=stats_summary, **result)
 
     async def _diagnostic_via_page(self, req: DiagnosticRequest) -> DiagnosticResult:
-        """Instancie un GraphClient à la volée avec LE token de CET utilisateur
-        (jamais une variable d'env globale — chaque utilisateur a le sien)."""
         graph = GraphClient(page_access_token=req.fb_page_token, page_id=req.fb_page_id)
         posts = await graph.get_recent_posts_stats()
         stats_summary = {
