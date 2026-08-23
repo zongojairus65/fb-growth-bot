@@ -57,8 +57,21 @@ class GeminiClient:
             raise RuntimeError(f"Réponse Gemini inattendue: {data}")
 
     async def generate_json(self, prompt: str, model: str = "gemma-4-31b-it") -> dict:
-        """Force une sortie JSON structurée, utile pour le diagnostic et les idées."""
+        """Force une sortie JSON structurée. Les modèles Gemma ajoutent parfois
+        du texte de raisonnement AVANT le JSON même avec responseMimeType=json —
+        on extrait donc la sous-chaîne entre la première { et la dernière }
+        plutôt que de faire confiance au texte brut."""
         import json
         raw = await self.generate(prompt, model=model, json_mode=True, temperature=0.7)
-        raw = raw.strip().removeprefix("```json").removesuffix("```").strip()
-        return json.loads(raw)
+        raw = raw.strip()
+
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start == -1 or end == -1 or end < start:
+            raise RuntimeError(f"Aucun JSON trouvé dans la réponse Gemini: {raw[:300]}")
+
+        json_str = raw[start:end + 1]
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"JSON invalide extrait de la réponse Gemini: {e} — contenu: {json_str[:300]}")
