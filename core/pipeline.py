@@ -1,12 +1,9 @@
-from core.gemini_client import GeminiClient
+from core.gemini_client import GeminiClient, MODEL_FLASH_35, MODEL_FLASH_LITE_35, MODEL_GEMMA_FREE
 from core import prompts
 from core.scraper_client import ScraperClient
 from facebook.graph_client import GraphClient
 from onboarding.funnel import build_projection
 from models import DiagnosticResult, EngagementProjection, DiagnosticRequest
-
-GEMINI_PREMIUM = "gemini-3.5-flash"
-GEMINI_FREE = "gemma-4-31b-it"
 
 
 class GrowthPipeline:
@@ -47,7 +44,7 @@ class GrowthPipeline:
         niche_hint = req.niche_hint or self.scraper.extract_niche_hint(details)
 
         prompt = prompts.diagnostic_prompt(req.fb_username, niche_hint, stats_summary)
-        result = await self.gemini.generate_json(prompt, model=GEMINI_FREE)
+        result = await self.gemini.generate_json(prompt, model=MODEL_FLASH_LITE_35)
         return DiagnosticResult(profile_id=req.profile_id, raw_stats=stats_summary, **result)
 
     async def _diagnostic_via_page(self, req: DiagnosticRequest) -> DiagnosticResult:
@@ -59,7 +56,7 @@ class GrowthPipeline:
         }
         label = req.fb_username or req.fb_page_id
         prompt = prompts.diagnostic_prompt(label, req.niche_hint, stats_summary)
-        result = await self.gemini.generate_json(prompt, model=GEMINI_FREE)
+        result = await self.gemini.generate_json(prompt, model=MODEL_FLASH_LITE_35)
         return DiagnosticResult(profile_id=req.profile_id, raw_stats=stats_summary, **result)
 
     async def growth_projection(self, profile_id: int, avg_reach: int = 0) -> EngagementProjection:
@@ -69,31 +66,31 @@ class GrowthPipeline:
 
     async def apply_quiz_context(self, reponses: dict) -> str:
         prompt = prompts.quiz_followup_prompt(reponses)
-        return await self.gemini.generate(prompt, model=GEMINI_FREE, temperature=0.6)
+        return await self.gemini.generate(prompt, model=MODEL_FLASH_LITE_35, temperature=0.6)
 
     async def generate_strategy(self, niche: str, audience: str, objectif: str, contexte_psy: str = "") -> list[dict]:
         niche_enrichie = f"{niche}\nContexte psychologique du créateur : {contexte_psy}" if contexte_psy else niche
         prompt = prompts.strategy_prompt(niche_enrichie, audience, objectif)
-        raw = await self.gemini.generate(prompt, model=GEMINI_PREMIUM)
+        raw = await self.gemini.generate(prompt, model=MODEL_FLASH_35)
         import json
         return json.loads(raw.strip().removeprefix("```json").removesuffix("```"))
 
     async def generate_hooks(self, idee: str, audience: str, ton: str) -> str:
         prompt = prompts.hooks_prompt(idee, audience, ton)
-        return await self.gemini.generate(prompt, model=GEMINI_PREMIUM)
+        return await self.gemini.generate(prompt, model=MODEL_FLASH_35)
 
     async def adapt_formats(self, idee: str, audience: str, objectif: str) -> str:
         prompt = prompts.format_adapter_prompt(idee, audience, objectif)
-        return await self.gemini.generate(prompt, model=GEMINI_PREMIUM)
+        return await self.gemini.generate(prompt, model=MODEL_FLASH_35)
 
     async def refine_full(self, contenu: str, voix: str, audience: str, objectif: str) -> dict:
         retenu = await self.gemini.generate(
-            prompts.retention_prompt(contenu, voix, audience), model=GEMINI_PREMIUM
+            prompts.retention_prompt(contenu, voix, audience), model=MODEL_FLASH_35
         )
         autorite = await self.gemini.generate(
-            prompts.authority_prompt(retenu, audience, voix), model=GEMINI_PREMIUM
+            prompts.authority_prompt(retenu, audience, voix), model=MODEL_FLASH_35
         )
         final = await self.gemini.generate(
-            prompts.engagement_amplifier_prompt(autorite, audience, objectif), model=GEMINI_PREMIUM
+            prompts.engagement_amplifier_prompt(autorite, audience, objectif), model=MODEL_FLASH_35
         )
         return {"retention": retenu, "autorite": autorite, "final": final}

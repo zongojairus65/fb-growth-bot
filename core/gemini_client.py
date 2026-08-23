@@ -1,10 +1,13 @@
 """
 Wrapper autour de l'API Gemini standard (endpoint generateContent).
 
-Deux modèles utilisables selon le budget / la criticité de la tâche :
-- "gemma-4-31b-it"   -> gratuit, bon pour les brouillons rapides et le quiz
-- "gemini-3.5-flash" -> payant, meilleure qualité de rédaction FR pour les
-                         prompts stratégiques (1, 2, 5, 6)
+Modèles disponibles, du moins cher au plus capable :
+- "gemma-4-31b-it"        -> gratuit ; NE PAS utiliser en mode JSON strict
+                             (le modèle ajoute du texte libre malgré responseMimeType)
+- "gemini-3.1-flash-lite" -> payant, low-cost ; extraction/classification simple
+- "gemini-3.5-flash-lite" -> payant, low-cost ; meilleur ratio prix/perf que 3.1,
+                             confirmé pour l'extraction de données JSON fiable
+- "gemini-3.5-flash"      -> payant, plus cher ; rédaction créative (stratégie/hooks)
 
 Vérifie toujours le nom exact du modèle dans Google AI Studio avant déploiement,
 les noms de modèles évoluent régulièrement.
@@ -17,6 +20,12 @@ from typing import Optional
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
+# Constantes de modèles, pour éviter les fautes de frappe dans le reste du code
+MODEL_GEMMA_FREE = "gemma-4-31b-it"
+MODEL_FLASH_LITE_31 = "gemini-3.1-flash-lite"
+MODEL_FLASH_LITE_35 = "gemini-3.5-flash-lite"
+MODEL_FLASH_35 = "gemini-3.5-flash"
+
 
 class GeminiClient:
     def __init__(self, api_key: Optional[str] = None, timeout: float = 30.0):
@@ -28,7 +37,7 @@ class GeminiClient:
     async def generate(
         self,
         prompt: str,
-        model: str = "gemma-4-31b-it",
+        model: str = MODEL_FLASH_LITE_35,
         json_mode: bool = False,
         temperature: float = 0.9,
     ) -> str:
@@ -56,11 +65,10 @@ class GeminiClient:
         except (KeyError, IndexError):
             raise RuntimeError(f"Réponse Gemini inattendue: {data}")
 
-    async def generate_json(self, prompt: str, model: str = "gemma-4-31b-it") -> dict:
-        """Force une sortie JSON structurée. Les modèles Gemma ajoutent parfois
-        du texte de raisonnement AVANT le JSON même avec responseMimeType=json —
-        on extrait donc la sous-chaîne entre la première { et la dernière }
-        plutôt que de faire confiance au texte brut."""
+    async def generate_json(self, prompt: str, model: str = MODEL_FLASH_LITE_35) -> dict:
+        """Force une sortie JSON structurée. Défaut sur Flash-Lite (fiable en JSON),
+        PAS Gemma qui ajoute du texte de raisonnement même avec responseMimeType=json.
+        Extraction robuste (première { à dernière }) en filet de sécurité."""
         import json
         raw = await self.generate(prompt, model=model, json_mode=True, temperature=0.7)
         raw = raw.strip()
