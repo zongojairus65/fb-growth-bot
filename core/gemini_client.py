@@ -20,7 +20,6 @@ from typing import Optional
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
-# Constantes de modèles, pour éviter les fautes de frappe dans le reste du code
 MODEL_GEMMA_FREE = "gemma-4-31b-it"
 MODEL_FLASH_LITE_31 = "gemini-3.1-flash-lite"
 MODEL_FLASH_LITE_35 = "gemini-3.5-flash-lite"
@@ -40,6 +39,7 @@ class GeminiClient:
         model: str = MODEL_FLASH_LITE_35,
         json_mode: bool = False,
         temperature: float = 0.9,
+        max_output_tokens: int = 4096,
     ) -> str:
         url = f"{BASE_URL}/{model}:generateContent?key={self.api_key}"
 
@@ -47,7 +47,7 @@ class GeminiClient:
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": temperature,
-                "maxOutputTokens": 4096,
+                "maxOutputTokens": max_output_tokens,
             },
         }
         if json_mode:
@@ -65,18 +65,45 @@ class GeminiClient:
         except (KeyError, IndexError):
             raise RuntimeError(f"Réponse Gemini inattendue: {data}")
 
-    async def generate_json(self, prompt: str, model: str = MODEL_FLASH_LITE_35) -> dict:
-        """Force une sortie JSON structurée. Défaut sur Flash-Lite (fiable en JSON),
-        PAS Gemma qui ajoute du texte de raisonnement même avec responseMimeType=json.
-        Extraction robuste (première { à dernière }) en filet de sécurité."""
+    async def generate_json(
+        self, prompt: str, model: str = MODEL_FLASH_LITE_35, max_output_tokens: int = 4096
+    ) -> dict:
+        """Force une sortie JSON structurée (objet). Défaut sur Flash-Lite (fiable
+        en JSON), PAS Gemma qui ajoute du texte de raisonnement même avec
+        responseMimeType=json. Extraction robuste (première { à dernière })
+        en filet de sécurité contre le texte parasite."""
         import json
-        raw = await self.generate(prompt, model=model, json_mode=True, temperature=0.7)
+        raw = await self.generate(
+            prompt, model=model, json_mode=True, temperature=0.7, max_output_tokens=max_output_tokens
+        )
         raw = raw.strip()
 
         start = raw.find("{")
         end = raw.rfind("}")
         if start == -1 or end == -1 or end < start:
             raise RuntimeError(f"Aucun JSON trouvé dans la réponse Gemini: {raw[:300]}")
+
+        json_str = raw[start:end + 1]
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"JSON invalide extrait de la réponse Gemini: {e} — contenu: {json_str[:300]}")
+
+    async def generate_json_list(
+        self, prompt: str, model: str = MODEL_FLASH_35, max_output_tokens: int = 8192
+    ) -> list:
+        """Variante pour une sortie JSON en LISTE (ex: 10 idées de stratégie),
+        qui a besoin de plus de tokens de sortie qu'un simple objet de diagnostic."""
+        import json
+        raw = await self.generate(
+            prompt, model=model, json_mode=True, temperature=0.9, max_output_tokens=max_output_tokens
+        )
+        raw = raw.strip()
+
+        start = raw.find("[")
+        end = raw.rfind("]")
+        if start == -1 or end == -1 or end < start:
+            raise RuntimeError(f"Aucune liste JSON trouvée dans la réponse Gemini: {raw[:300]}")
 
         json_str = raw[start:end + 1]
         try:

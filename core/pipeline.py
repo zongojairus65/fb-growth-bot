@@ -69,19 +69,20 @@ class GrowthPipeline:
         return await self.gemini.generate(prompt, model=MODEL_FLASH_LITE_35, temperature=0.6)
 
     async def generate_strategy(self, niche: str, audience: str, objectif: str, contexte_psy: str = "") -> list[dict]:
+        """10 idées détaillées -> sortie volumineuse, d'où max_output_tokens élevé
+        et l'extraction JSON robuste (liste), après avoir eu une réponse tronquée
+        avec la limite par défaut de 4096 tokens."""
         niche_enrichie = f"{niche}\nContexte psychologique du créateur : {contexte_psy}" if contexte_psy else niche
         prompt = prompts.strategy_prompt(niche_enrichie, audience, objectif)
-        raw = await self.gemini.generate(prompt, model=MODEL_FLASH_35)
-        import json
-        return json.loads(raw.strip().removeprefix("```json").removesuffix("```"))
+        return await self.gemini.generate_json_list(prompt, model=MODEL_FLASH_35, max_output_tokens=8192)
 
     async def generate_hooks(self, idee: str, audience: str, ton: str) -> str:
         prompt = prompts.hooks_prompt(idee, audience, ton)
-        return await self.gemini.generate(prompt, model=MODEL_FLASH_35)
+        return await self.gemini.generate(prompt, model=MODEL_FLASH_35, max_output_tokens=4096)
 
     async def adapt_formats(self, idee: str, audience: str, objectif: str) -> str:
         prompt = prompts.format_adapter_prompt(idee, audience, objectif)
-        return await self.gemini.generate(prompt, model=MODEL_FLASH_35)
+        return await self.gemini.generate(prompt, model=MODEL_FLASH_35, max_output_tokens=4096)
 
     async def refine_full(self, contenu: str, voix: str, audience: str, objectif: str) -> dict:
         retenu = await self.gemini.generate(
