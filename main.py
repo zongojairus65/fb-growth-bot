@@ -42,8 +42,8 @@ async def submit_quiz_answer(answer: QuizAnswer):
 async def diagnostic(req: DiagnosticRequest):
     """
     Diagnostic unique, deux chemins possibles selon ce que l'utilisateur fournit :
-    - fb_username seul          -> scraper (rapide, léger, sans connexion, likes/commentaires uniquement)
-    - fb_page_id + fb_page_token -> Graph API (plus riche : impressions/portée réelles, nécessite OAuth)
+    - fb_username seul           -> scraper (rapide, léger, sans connexion)
+    - fb_page_id + fb_page_token -> Graph API (plus riche, nécessite OAuth)
     """
     try:
         result = await pipeline.run_diagnostic(req)
@@ -52,6 +52,46 @@ async def diagnostic(req: DiagnosticRequest):
     except RuntimeError as e:
         raise HTTPException(503, str(e))
     return result
+
+
+@app.get("/debug/scraper/{username}")
+async def debug_scraper(username: str):
+    """
+    ENDPOINT TEMPORAIRE — à supprimer une fois le pipeline scraper stabilisé.
+    Teste chaque étape séparément pour isoler précisément où ça échoue,
+    au lieu de deviner à partir de l'erreur globale du /diagnostic.
+    """
+    if not pipeline.scraper:
+        return {"error": "Scraper non configuré (RAPIDAPI_KEY manquant)"}
+
+    steps = {}
+
+    try:
+        profile_id = await pipeline.scraper.resolve_username_to_id(username)
+        steps["resolve_username_to_id"] = {"success": True, "result": profile_id}
+    except Exception as e:
+        steps["resolve_username_to_id"] = {"success": False, "error": str(e)}
+        return steps  # inutile de continuer sans profile_id
+
+    try:
+        details = await pipeline.scraper.fetch_profile_details(profile_id)
+        steps["fetch_profile_details"] = {"success": True, "result": details}
+    except Exception as e:
+        steps["fetch_profile_details"] = {"success": False, "error": str(e)}
+
+    try:
+        posts = await pipeline.scraper.fetch_public_profile_posts(profile_id)
+        steps["fetch_public_profile_posts"] = {"success": True, "count": len(posts)}
+    except Exception as e:
+        steps["fetch_public_profile_posts"] = {"success": False, "error": str(e)}
+
+    try:
+        reels = await pipeline.scraper.fetch_profile_reels(profile_id)
+        steps["fetch_profile_reels"] = {"success": True, "count": len(reels)}
+    except Exception as e:
+        steps["fetch_profile_reels"] = {"success": False, "error": str(e)}
+
+    return steps
 
 
 @app.get("/projection/{profile_id}")
