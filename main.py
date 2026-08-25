@@ -7,6 +7,7 @@ from core.gemini_client import GeminiClient
 from core.scraper_client import ScraperClient
 from facebook.graph_client import GraphClient
 from core.pipeline import GrowthPipeline
+from core import db
 from onboarding.funnel import SCAN_STEPS, QUIZ_QUESTIONS
 
 load_dotenv()
@@ -51,6 +52,18 @@ async def diagnostic(req: DiagnosticRequest):
         raise HTTPException(400, str(e))
     except RuntimeError as e:
         raise HTTPException(503, str(e))
+
+    # La persistance ne doit JAMAIS faire échouer la réponse au client,
+    # même si core/db.py a déjà ses propres try/except internes — défense
+    # en profondeur après l'incident précédent.
+    try:
+        result_dict = result.model_dump() if hasattr(result, "model_dump") else result.dict()
+        await db.save_diagnostic(
+            req.profile_id, req.fb_username or req.fb_page_id or "", req.niche_hint or "", result_dict
+        )
+    except Exception as e:
+        print(f"[main] Sauvegarde diagnostic ignorée suite à une erreur: {e}")
+
     return result
 
 
@@ -60,8 +73,14 @@ async def projection(profile_id: int, avg_reach: int = 0):
 
 
 @app.post("/strategy")
-async def strategy(niche: str, audience: str, objectif: str, contexte_psy: str = ""):
+async def strategy(profile_id: int, niche: str, audience: str, objectif: str, contexte_psy: str = ""):
     ideas = await pipeline.generate_strategy(niche, audience, objectif, contexte_psy)
+
+    try:
+        await db.save_strategy_ideas(profile_id, ideas)
+    except Exception as e:
+        print(f"[main] Sauvegarde stratégie ignorée suite à une erreur: {e}")
+
     return {"ideas": ideas}
 
 
@@ -98,9 +117,8 @@ async def publish_photo(image_url: str, fb_page_id: str, fb_page_token: str, cap
     return result
 
 
-from core import db as _db_test_module
-
 @app.get("/debug/db-test")
 async def debug_db_test():
-    """Test isolé de la persistance — n'affecte aucun autre endpoint."""
-    return await _db_test_module.test_connection()
+    """Test isolé de la persistance — utile à garder pour diagnostiquer
+    rapidement en cas de nouveau problème de connexion DB."""
+    return await db.test_connection()
