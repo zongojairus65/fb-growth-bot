@@ -96,3 +96,11 @@ async def publish_photo(image_url: str, fb_page_id: str, fb_page_token: str, cap
     graph = GraphClient(page_access_token=fb_page_token, page_id=fb_page_id)
     result = await graph.publish_photo_post(image_url, caption)
     return result
+
+
+from core import db as _db_test_module
+
+@app.get("/debug/db-test")
+async def debug_db_test():
+    """Test isolé de la persistance — n'affecte aucun autre endpoint."""
+    return await _db_test_module.test_connection()

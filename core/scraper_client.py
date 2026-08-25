@@ -34,17 +34,18 @@ class ScraperClient:
         }
 
     async def resolve_username_to_id(self, username: str) -> Optional[str]:
-        """Endpoint confirmé : /profile/details_url (pas /profile/id).
-        Réponse structurée comme details_id : {"profile": {"profile_id": ...}}
-        — à reconfirmer par test réel si la résolution échoue encore."""
+        """Endpoint confirmé : /profile/details_url. Réponse confirmée :
+        {"profile": {"profile_id": "4", ...}}
+        Lève une erreur explicite en cas de problème d'auth/API plutôt que
+        de renvoyer None silencieusement (qui masquait les vraies causes)."""
         url = f"{self.base_url}/profile/details_url"
         params = {"url": f"https://www.facebook.com/{username}"}
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.get(url, headers=self._headers(), params=params)
         if resp.status_code != 200:
-            return None
+            raise RuntimeError(f"RapidAPI error {resp.status_code} sur resolve_username_to_id: {resp.text}")
         data = resp.json()
-        profile = data.get("profile", data)  # gère les deux formats possibles
+        profile = data.get("profile", data)
         return profile.get("profile_id") or profile.get("id")
 
     async def fetch_profile_details(self, profile_id: str) -> dict:
