@@ -4,8 +4,7 @@ obligatoire avec le pooler PgBouncer de Neon en mode transaction.
 
 Toutes les fonctions sont conçues pour ne JAMAIS lever d'exception vers
 l'appelant — un échec de persistance ne doit jamais perturber la réponse
-HTTP principale. C'est le point qui semble avoir cassé /diagnostic la
-dernière fois ; on le teste ici isolément avant de rebrancher.
+HTTP principale.
 """
 
 import os
@@ -33,22 +32,44 @@ async def get_pool() -> Optional[asyncpg.Pool]:
 
 
 async def test_connection() -> dict:
-    """Endpoint de diagnostic isolé — vérifie juste que la connexion et une
-    insertion basique fonctionnent, sans toucher au reste de l'app."""
-    pool = await get_pool()
-    if not pool:
-        return {"success": False, "error": "Pool non disponible (DATABASE_URL manquant ou connexion échouée)"}
+    """Endpoint de diagnostic isolé — expose l'erreur réelle de connexion
+    plutôt que le message générique de get_pool()."""
+    if not DATABASE_URL:
+        return {"success": False, "error": "DATABASE_URL est vide ou absente de l'environnement"}
     try:
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO generations (endpoint, request_params, result) VALUES ($1, $2, $3)",
-                "test_connection",
-                json.dumps({"test": True}),
-                json.dumps({"ok": True}),
-            )
+        conn = await asyncpg.connect(DATABASE_URL, statement_cache_size=0)
+        await conn.execute(
+            "INSERT INTO generations (endpoint, request_params, result) VALUES ($1, $2, $3)",
+            "test_connection",
+            json.dumps({"test": True}),
+            json.dumps({"ok": True}),
+        )
+        await conn.close()
         return {"success": True}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": f"{type(e).__name__}: {str(e)}"}
+
+
+async def create_profile(
+    fb_username: str = "", fb_page_id: str = "", niche: str = "", audience: str = "", objectif: str = ""
+) -> Optional[int]:
+    """Crée un profil et retourne son id. Nécessaire avant tout diagnostic/
+    stratégie, puisque diagnostics.profile_id et content_ideas.profile_id
+    référencent profiles(id) via une contrainte de clé étrangère."""
+    pool = await get_pool()
+    if not pool:
+        return None
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """INSERT INTO profiles (fb_username, fb_page_id, niche, audience, objectif)
+                   VALUES ($1, $2, $3, $4, $5) RETURNING id""",
+                fb_username, fb_page_id, niche, audience, objectif,
+            )
+            return row["id"] if row else None
+    except Exception as e:
+        print(f"[db] Échec de création de profil: {e}")
+        return None
 
 
 async def save_generation(endpoint: str, request_params: dict, result) -> None:

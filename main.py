@@ -19,9 +19,22 @@ gemini = GeminiClient()
 try:
     scraper = ScraperClient()
 except RuntimeError:
-    scraper = None  # le bot fonctionne quand même, mais le mode "username seul" sera indisponible
+    scraper = None
 
 pipeline = GrowthPipeline(gemini, scraper)
+
+
+@app.post("/profile")
+async def create_profile(
+    fb_username: str = "", fb_page_id: str = "", niche: str = "", audience: str = "", objectif: str = ""
+):
+    """Crée un profil, retourne son id — à appeler AVANT /diagnostic ou
+    /strategy, puisque ces deux tables référencent profiles(id) via une
+    contrainte de clé étrangère (sinon: violation de foreign key)."""
+    profile_id = await db.create_profile(fb_username, fb_page_id, niche, audience, objectif)
+    if profile_id is None:
+        raise HTTPException(500, "Échec de création du profil")
+    return {"profile_id": profile_id}
 
 
 @app.get("/onboarding/scan-steps")
@@ -45,6 +58,7 @@ async def diagnostic(req: DiagnosticRequest):
     Diagnostic unique, deux chemins possibles selon ce que l'utilisateur fournit :
     - fb_username seul           -> scraper (rapide, léger, sans connexion)
     - fb_page_id + fb_page_token -> Graph API (plus riche, nécessite OAuth)
+    NOTE: req.profile_id doit correspondre à un profil déjà créé via POST /profile.
     """
     try:
         result = await pipeline.run_diagnostic(req)
@@ -53,9 +67,6 @@ async def diagnostic(req: DiagnosticRequest):
     except RuntimeError as e:
         raise HTTPException(503, str(e))
 
-    # La persistance ne doit JAMAIS faire échouer la réponse au client,
-    # même si core/db.py a déjà ses propres try/except internes — défense
-    # en profondeur après l'incident précédent.
     try:
         result_dict = result.model_dump() if hasattr(result, "model_dump") else result.dict()
         await db.save_diagnostic(
@@ -74,6 +85,7 @@ async def projection(profile_id: int, avg_reach: int = 0):
 
 @app.post("/strategy")
 async def strategy(profile_id: int, niche: str, audience: str, objectif: str, contexte_psy: str = ""):
+    """NOTE: profile_id doit correspondre à un profil déjà créé via POST /profile."""
     ideas = await pipeline.generate_strategy(niche, audience, objectif, contexte_psy)
 
     try:
