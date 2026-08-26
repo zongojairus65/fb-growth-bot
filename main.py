@@ -97,20 +97,40 @@ async def strategy(profile_id: int, niche: str, audience: str, objectif: str, co
 
 
 @app.post("/hooks")
-async def hooks(idee: str, audience: str, ton: str):
+async def hooks(profile_id: int, idee: str, audience: str, ton: str):
     result = await pipeline.generate_hooks(idee, audience, ton)
+    try:
+        await db.save_generation(
+            "hooks", {"idee": idee, "audience": audience, "ton": ton, "profile_id": profile_id}, result
+        )
+    except Exception as e:
+        print(f"[main] Sauvegarde hooks ignorée suite à une erreur: {e}")
     return {"hooks": result}
 
 
 @app.post("/formats")
-async def formats(idee: str, audience: str, objectif: str):
+async def formats(profile_id: int, idee: str, audience: str, objectif: str):
     result = await pipeline.adapt_formats(idee, audience, objectif)
+    try:
+        await db.save_generation(
+            "formats", {"idee": idee, "audience": audience, "objectif": objectif, "profile_id": profile_id}, result
+        )
+    except Exception as e:
+        print(f"[main] Sauvegarde formats ignorée suite à une erreur: {e}")
     return {"formats": result}
 
 
 @app.post("/refine")
-async def refine(contenu: str, voix: str, audience: str, objectif: str):
+async def refine(profile_id: int, contenu: str, voix: str, audience: str, objectif: str):
     result = await pipeline.refine_full(contenu, voix, audience, objectif)
+    try:
+        await db.save_generation(
+            "refine",
+            {"contenu": contenu, "voix": voix, "audience": audience, "objectif": objectif, "profile_id": profile_id},
+            result,
+        )
+    except Exception as e:
+        print(f"[main] Sauvegarde refine ignorée suite à une erreur: {e}")
     return result
 
 
