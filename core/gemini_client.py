@@ -27,7 +27,7 @@ MODEL_FLASH_35 = "gemini-3.5-flash"
 
 
 class GeminiClient:
-    def __init__(self, api_key: Optional[str] = None, timeout: float = 30.0):
+    def __init__(self, api_key: Optional[str] = None, timeout: float = 60.0):
         self.api_key = api_key or GEMINI_API_KEY
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY manquant dans l'environnement")

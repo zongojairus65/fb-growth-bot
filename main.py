@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 
 from models import Profile, QuizAnswer, DiagnosticRequest
 from core.gemini_client import GeminiClient
+from core.mistral_client import MistralClient
 from core.scraper_client import ScraperClient
 from facebook.graph_client import GraphClient
 from core.pipeline import GrowthPipeline
@@ -21,7 +22,12 @@ try:
 except RuntimeError:
     scraper = None
 
-pipeline = GrowthPipeline(gemini, scraper)
+try:
+    mistral = MistralClient()
+except RuntimeError:
+    mistral = None  # repli indisponible si MISTRAL_API_KEY manquant, refine_full fonctionnera sans filet
+
+pipeline = GrowthPipeline(gemini, scraper, mistral)
 
 
 @app.post("/profile")

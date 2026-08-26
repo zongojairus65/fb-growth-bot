@@ -7,9 +7,10 @@ from models import DiagnosticResult, EngagementProjection, DiagnosticRequest
 
 
 class GrowthPipeline:
-    def __init__(self, gemini: GeminiClient, scraper: ScraperClient | None = None):
+    def __init__(self, gemini: GeminiClient, scraper: ScraperClient | None = None, mistral=None):
         self.gemini = gemini
         self.scraper = scraper
+        self.mistral = mistral  # optionnel — repli si Gemini indisponible
 
     async def run_diagnostic(self, req: DiagnosticRequest) -> DiagnosticResult:
         has_username = bool(req.fb_username)
@@ -85,13 +86,17 @@ class GrowthPipeline:
         return await self.gemini.generate(prompt, model=MODEL_FLASH_35, max_output_tokens=4096)
 
     async def refine_full(self, contenu: str, voix: str, audience: str, objectif: str) -> dict:
-        retenu = await self.gemini.generate(
-            prompts.retention_prompt(contenu, voix, audience), model=MODEL_FLASH_35
-        )
-        autorite = await self.gemini.generate(
-            prompts.authority_prompt(retenu, audience, voix), model=MODEL_FLASH_35
-        )
-        final = await self.gemini.generate(
-            prompts.engagement_amplifier_prompt(autorite, audience, objectif), model=MODEL_FLASH_35
-        )
+        async def _generate_with_fallback(prompt: str) -> str:
+            try:
+                return await self.gemini.generate(prompt, model=MODEL_FLASH_35)
+            except Exception as e:
+                if not self.mistral:
+                    raise  # pas de repli configuré, l'erreur remonte normalement
+                print(f"[pipeline] Gemini indisponible ({e}), repli sur Mistral Medium")
+                from core.mistral_client import MODEL_MISTRAL_MEDIUM
+                return await self.mistral.generate(prompt, model=MODEL_MISTRAL_MEDIUM)
+
+        retenu = await _generate_with_fallback(prompts.retention_prompt(contenu, voix, audience))
+        autorite = await _generate_with_fallback(prompts.authority_prompt(retenu, audience, voix))
+        final = await _generate_with_fallback(prompts.engagement_amplifier_prompt(autorite, audience, objectif))
         return {"retention": retenu, "autorite": autorite, "final": final}
