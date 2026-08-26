@@ -1,4 +1,5 @@
 from core.gemini_client import GeminiClient, MODEL_FLASH_35, MODEL_FLASH_LITE_35, MODEL_GEMMA_FREE
+from core.mistral_client import MODEL_MISTRAL_SMALL, MODEL_MISTRAL_MEDIUM
 from core import prompts
 from core.scraper_client import ScraperClient
 from facebook.graph_client import GraphClient
@@ -11,6 +12,39 @@ class GrowthPipeline:
         self.gemini = gemini
         self.scraper = scraper
         self.mistral = mistral  # optionnel — repli si Gemini indisponible
+
+    async def _text_with_fallback(
+        self, prompt: str, model: str = MODEL_FLASH_35, temperature: float = 0.9, max_output_tokens: int = 4096
+    ) -> str:
+        try:
+            return await self.gemini.generate(prompt, model=model, temperature=temperature, max_output_tokens=max_output_tokens)
+        except Exception as e:
+            if not self.mistral:
+                raise
+            print(f"[pipeline] Gemini indisponible ({e}), repli sur Mistral (texte)")
+            return await self.mistral.generate(prompt, model=MODEL_MISTRAL_MEDIUM, temperature=temperature, max_output_tokens=max_output_tokens)
+
+    async def _json_with_fallback(
+        self, prompt: str, model: str = MODEL_FLASH_LITE_35, max_output_tokens: int = 4096
+    ) -> dict:
+        try:
+            return await self.gemini.generate_json(prompt, model=model, max_output_tokens=max_output_tokens)
+        except Exception as e:
+            if not self.mistral:
+                raise
+            print(f"[pipeline] Gemini indisponible ({e}), repli sur Mistral (JSON)")
+            return await self.mistral.generate_json(prompt, model=MODEL_MISTRAL_SMALL, max_output_tokens=max_output_tokens)
+
+    async def _json_list_with_fallback(
+        self, prompt: str, model: str = MODEL_FLASH_35, max_output_tokens: int = 8192
+    ) -> list:
+        try:
+            return await self.gemini.generate_json_list(prompt, model=model, max_output_tokens=max_output_tokens)
+        except Exception as e:
+            if not self.mistral:
+                raise
+            print(f"[pipeline] Gemini indisponible ({e}), repli sur Mistral (JSON liste)")
+            return await self.mistral.generate_json_list(prompt, model=MODEL_MISTRAL_MEDIUM, max_output_tokens=max_output_tokens)
 
     async def run_diagnostic(self, req: DiagnosticRequest) -> DiagnosticResult:
         has_username = bool(req.fb_username)
@@ -45,7 +79,7 @@ class GrowthPipeline:
         niche_hint = req.niche_hint or self.scraper.extract_niche_hint(details)
 
         prompt = prompts.diagnostic_prompt(req.fb_username, niche_hint, stats_summary)
-        result = await self.gemini.generate_json(prompt, model=MODEL_FLASH_LITE_35)
+        result = await self._json_with_fallback(prompt, model=MODEL_FLASH_LITE_35)
         return DiagnosticResult(profile_id=req.profile_id, raw_stats=stats_summary, **result)
 
     async def _diagnostic_via_page(self, req: DiagnosticRequest) -> DiagnosticResult:
@@ -57,7 +91,7 @@ class GrowthPipeline:
         }
         label = req.fb_username or req.fb_page_id
         prompt = prompts.diagnostic_prompt(label, req.niche_hint, stats_summary)
-        result = await self.gemini.generate_json(prompt, model=MODEL_FLASH_LITE_35)
+        result = await self._json_with_fallback(prompt, model=MODEL_FLASH_LITE_35)
         return DiagnosticResult(profile_id=req.profile_id, raw_stats=stats_summary, **result)
 
     async def growth_projection(self, profile_id: int, avg_reach: int = 0) -> EngagementProjection:
@@ -75,28 +109,18 @@ class GrowthPipeline:
         avec la limite par défaut de 4096 tokens."""
         niche_enrichie = f"{niche}\nContexte psychologique du créateur : {contexte_psy}" if contexte_psy else niche
         prompt = prompts.strategy_prompt(niche_enrichie, audience, objectif)
-        return await self.gemini.generate_json_list(prompt, model=MODEL_FLASH_35, max_output_tokens=8192)
+        return await self._json_list_with_fallback(prompt, model=MODEL_FLASH_35, max_output_tokens=8192)
 
     async def generate_hooks(self, idee: str, audience: str, ton: str) -> str:
         prompt = prompts.hooks_prompt(idee, audience, ton)
-        return await self.gemini.generate(prompt, model=MODEL_FLASH_35, max_output_tokens=4096)
+        return await self._text_with_fallback(prompt, model=MODEL_FLASH_35, max_output_tokens=4096)
 
     async def adapt_formats(self, idee: str, audience: str, objectif: str) -> str:
         prompt = prompts.format_adapter_prompt(idee, audience, objectif)
-        return await self.gemini.generate(prompt, model=MODEL_FLASH_35, max_output_tokens=4096)
+        return await self._text_with_fallback(prompt, model=MODEL_FLASH_35, max_output_tokens=4096)
 
     async def refine_full(self, contenu: str, voix: str, audience: str, objectif: str) -> dict:
-        async def _generate_with_fallback(prompt: str) -> str:
-            try:
-                return await self.gemini.generate(prompt, model=MODEL_FLASH_35)
-            except Exception as e:
-                if not self.mistral:
-                    raise  # pas de repli configuré, l'erreur remonte normalement
-                print(f"[pipeline] Gemini indisponible ({e}), repli sur Mistral Medium")
-                from core.mistral_client import MODEL_MISTRAL_MEDIUM
-                return await self.mistral.generate(prompt, model=MODEL_MISTRAL_MEDIUM)
-
-        retenu = await _generate_with_fallback(prompts.retention_prompt(contenu, voix, audience))
-        autorite = await _generate_with_fallback(prompts.authority_prompt(retenu, audience, voix))
-        final = await _generate_with_fallback(prompts.engagement_amplifier_prompt(autorite, audience, objectif))
+        retenu = await self._text_with_fallback(prompts.retention_prompt(contenu, voix, audience), model=MODEL_FLASH_35)
+        autorite = await self._text_with_fallback(prompts.authority_prompt(retenu, audience, voix), model=MODEL_FLASH_35)
+        final = await self._text_with_fallback(prompts.engagement_amplifier_prompt(autorite, audience, objectif), model=MODEL_FLASH_35)
         return {"retention": retenu, "autorite": autorite, "final": final}
