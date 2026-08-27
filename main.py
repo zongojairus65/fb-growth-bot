@@ -1,5 +1,6 @@
 import os
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 from models import Profile, QuizAnswer, DiagnosticRequest
@@ -14,6 +15,14 @@ from onboarding.funnel import SCAN_STEPS, QUIZ_QUESTIONS
 load_dotenv()
 
 app = FastAPI(title="FB Growth Bot")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 gemini = GeminiClient()
 
