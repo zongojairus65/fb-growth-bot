@@ -130,3 +130,38 @@ async def save_strategy_ideas(profile_id: int, ideas: list[dict]) -> None:
                 )
     except Exception as e:
         print(f"[db] Échec de sauvegarde stratégie: {e}")
+
+
+async def save_quiz_answer(profile_id: int, question_id: str, answer: str) -> None:
+    pool = await get_pool()
+    if not pool:
+        return
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO quiz_answers (profile_id, question_id, answer) VALUES ($1, $2, $3)",
+                profile_id, question_id, answer,
+            )
+    except Exception as e:
+        print(f"[db] Échec de sauvegarde réponse quiz: {e}")
+
+
+async def get_quiz_answers(profile_id: int) -> dict:
+    """Retourne les réponses les plus récentes par question_id pour un profil
+    (DISTINCT ON évite les doublons si l'utilisateur a répondu plusieurs fois)."""
+    pool = await get_pool()
+    if not pool:
+        return {}
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT DISTINCT ON (question_id) question_id, answer
+                   FROM quiz_answers
+                   WHERE profile_id = $1
+                   ORDER BY question_id, created_at DESC""",
+                profile_id,
+            )
+            return {row["question_id"]: row["answer"] for row in rows}
+    except Exception as e:
+        print(f"[db] Échec de lecture réponses quiz: {e}")
+        return {}

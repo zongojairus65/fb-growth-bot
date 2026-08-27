@@ -55,7 +55,24 @@ def get_quiz():
 
 @app.post("/onboarding/quiz/answer")
 async def submit_quiz_answer(answer: QuizAnswer):
+    """Sauvegarde réelle en base — chaque réponse alimente ensuite
+    le contexte psychologique utilisé automatiquement par /strategy."""
+    try:
+        await db.save_quiz_answer(answer.profile_id, answer.question_id, answer.answer)
+    except Exception as e:
+        print(f"[main] Sauvegarde réponse quiz ignorée: {e}")
     return {"status": "recu", "question_id": answer.question_id}
+
+
+@app.get("/onboarding/quiz/context/{profile_id}")
+async def quiz_context(profile_id: int):
+    """Calcule le contexte psychologique à partir des réponses stockées.
+    Utile pour prévisualiser avant de lancer /strategy, ou en debug."""
+    reponses = await db.get_quiz_answers(profile_id)
+    if not reponses:
+        return {"contexte_psy": ""}
+    contexte = await pipeline.apply_quiz_context(reponses)
+    return {"contexte_psy": contexte}
 
 
 @app.post("/diagnostic")
@@ -91,7 +108,18 @@ async def projection(profile_id: int, avg_reach: int = 0):
 
 @app.post("/strategy")
 async def strategy(profile_id: int, niche: str, audience: str, objectif: str, contexte_psy: str = ""):
-    """NOTE: profile_id doit correspondre à un profil déjà créé via POST /profile."""
+    """NOTE: profile_id doit correspondre à un profil déjà créé via POST /profile.
+    Si contexte_psy n'est pas fourni explicitement, on va chercher les réponses
+    du quiz déjà stockées pour ce profil et on les transforme en contexte
+    automatiquement — c'est ce qui rend le quiz réellement utile."""
+    if not contexte_psy:
+        reponses = await db.get_quiz_answers(profile_id)
+        if reponses:
+            try:
+                contexte_psy = await pipeline.apply_quiz_context(reponses)
+            except Exception as e:
+                print(f"[main] Contexte psy ignoré suite à une erreur: {e}")
+
     ideas = await pipeline.generate_strategy(niche, audience, objectif, contexte_psy)
 
     try:
