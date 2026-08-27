@@ -11,7 +11,7 @@ from typing import Optional
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
 BASE_URL = "https://api.mistral.ai/v1/chat/completions"
 
-MODEL_MISTRAL_SMALL = "mistral-small-4"
+MODEL_MISTRAL_SMALL = "mistral-small-latest"
 MODEL_MISTRAL_MEDIUM = "mistral-medium-3.5"
 
 
