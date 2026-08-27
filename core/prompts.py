@@ -37,19 +37,23 @@ message motivationnel qui résonnerait avec lui avant de lui proposer du contenu
 
 def strategy_prompt(niche: str, audience: str, objectif: str) -> str:
     return f"""Agis en tant que stratège senior en croissance Facebook. Analyse ma
-niche et mon audience, identifie les 7 tendances de contenu les plus saturées sur
-Facebook, et crée 10 idées de posts qui cassent intentionnellement ces tendances
-tout en restant alignées avec les algorithmes de la plateforme. Pour chaque idée,
-fournis : le concept, le hook, le format du post (texte, image, vidéo, ou lien),
-l'angle psychologique, et pourquoi ça générerait des commentaires, des partages,
-et des sauvegardes.
+niche et mon audience, identifie mentalement les 7 tendances de contenu les plus
+saturées sur Facebook (sans les lister séparément dans ta réponse), puis crée 10
+idées de posts qui cassent intentionnellement ces tendances tout en restant
+alignées avec les algorithmes de la plateforme.
 
 Niche : {niche}
 Audience : {audience}
 Objectif : {objectif}
 
-Réponds en JSON, sous forme de liste de 10 objets avec les clés :
-concept, hook, format, angle_psychologique, justification_engagement."""
+IMPORTANT — format de réponse strict :
+Réponds UNIQUEMENT avec un tableau JSON contenant exactement 10 objets, rien
+d'autre avant ou après (pas de liste de tendances séparée, pas de texte
+d'introduction, pas de markdown). Chaque objet doit avoir exactement ces clés :
+concept, hook, format, angle_psychologique, justification_engagement.
+
+Exemple de structure attendue (juste la forme, pas le contenu) :
+[{{"concept": "...", "hook": "...", "format": "...", "angle_psychologique": "...", "justification_engagement": "..."}}, ...]"""
 
 
 def hooks_prompt(idee: str, audience: str, ton: str) -> str:
