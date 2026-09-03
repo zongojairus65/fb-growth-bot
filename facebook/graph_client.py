@@ -6,6 +6,9 @@ jamais sur un profil personnel, quel que soit le nombre de followers. Le token
 utilisé ici doit être un token de PAGE longue durée, obtenu via un token
 utilisateur avec les permissions : pages_manage_posts, pages_read_engagement,
 pages_show_list.
+
+NOTE (nov. 2026): post_impressions a été déprécié par Meta le 15/11/2025,
+remplacé par post_media_view — voir Graph API changelog v25.0.
 """
 
 import httpx
@@ -32,13 +35,14 @@ class GraphClient:
 
     async def get_recent_posts_stats(self, limit: int = 30) -> list[dict]:
         """Récupère les posts récents de la Page avec leurs insights de base,
-        utilisés comme données réelles pour le prompt de diagnostic."""
+        utilisés comme données réelles pour le prompt de diagnostic.
+        Utilise post_media_view (remplace post_impressions, déprécié)."""
         url = f"{GRAPH_URL}/{self.page_id}/posts"
         params = {
             "access_token": self.token,
             "fields": (
                 "id,message,created_time,"
-                "insights.metric(post_impressions,post_engaged_users)"
+                "insights.metric(post_media_view,post_engaged_users)"
             ),
             "limit": limit,
         }
@@ -56,7 +60,7 @@ class GraphClient:
         count = 0
         for p in posts:
             for insight in p.get("insights", {}).get("data", []):
-                if insight["name"] == "post_impressions":
+                if insight["name"] == "post_media_view":
                     total += insight["values"][0]["value"]
                     count += 1
         return int(total / count) if count else 0
