@@ -96,9 +96,10 @@ class ScraperClient:
     def extract_sample_messages(self, posts: list[dict], limit: int = 8) -> list[str]:
         """Extrait les vrais textes des posts (pas juste des compteurs),
         pour que le diagnostic IA se base sur le contenu réel plutôt que
-        de deviner la niche à partir de la bio uniquement — corrige les
-        diagnostics non fiables observés quand seuls les chiffres sont fournis."""
-        messages = [p.get("message", "").strip() for p in posts if p.get("message", "").strip()]
+        de deviner la niche à partir de la bio uniquement. Certains posts
+        (ex: type 'story', changement de photo de profil) ont message=None
+        plutôt qu'une clé absente — d'où le `or ""` pour sécuriser."""
+        messages = [(p.get("message") or "").strip() for p in posts if (p.get("message") or "").strip()]
         return messages[:limit]
 
     def summarize_reels(self, reels: list[dict]) -> dict:
