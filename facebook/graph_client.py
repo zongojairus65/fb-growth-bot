@@ -7,16 +7,20 @@ utilisé ici doit être un token de PAGE longue durée, obtenu via un token
 utilisateur avec les permissions : pages_manage_posts, pages_read_engagement,
 pages_show_list.
 
+LIMITE META CONFIRMÉE PAR TEST RÉEL : les Insights de Page ne sont disponibles
+que pour les Pages ayant 100+ followers/likes. En dessous, Meta renvoie
+systématiquement "(#100) The value must be a valid insights metric", quelle
+que soit la métrique ou la syntaxe utilisée — ce n'est pas un bug de code.
+
 NOTE (nov. 2026): post_impressions a été déprécié par Meta le 15/11/2025,
-remplacé par post_media_view — voir Graph API changelog v25.0. Ce métrique
-nécessite un .period(lifetime) explicite, contrairement à l'ancien
-post_impressions qui fonctionnait sans.
+remplacé par post_media_view — voir Graph API changelog v25.0.
 """
 
 import httpx
 from typing import Optional
 
 GRAPH_URL = "https://graph.facebook.com/v20.0"
+MIN_FOLLOWERS_FOR_INSIGHTS = 100
 
 
 class GraphClient:
@@ -35,10 +39,30 @@ class GraphClient:
             return None
         return resp.json()
 
+    async def get_follower_count(self) -> int:
+        """Vérifie le nombre de followers avant de tenter les insights,
+        pour donner un message clair plutôt que l'erreur Graph API brute."""
+        url = f"{GRAPH_URL}/{self.page_id}"
+        params = {"fields": "followers_count,fan_count", "access_token": self.token}
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, params=params)
+        if resp.status_code != 200:
+            return 0
+        data = resp.json()
+        return data.get("followers_count") or data.get("fan_count") or 0
+
     async def get_recent_posts_stats(self, limit: int = 30) -> list[dict]:
-        """Récupère les posts récents de la Page avec leurs insights de base,
-        utilisés comme données réelles pour le prompt de diagnostic.
-        Utilise post_media_view avec period(lifetime) (remplace post_impressions, déprécié)."""
+        """Récupère les posts récents de la Page avec leurs insights de base.
+        Lève une erreur claire si la Page a moins de 100 followers (limite
+        Meta confirmée par test réel, indépendante du nom de métrique)."""
+        follower_count = await self.get_follower_count()
+        if follower_count < MIN_FOLLOWERS_FOR_INSIGHTS:
+            raise RuntimeError(
+                f"Cette Page a {follower_count} followers — Meta exige au moins "
+                f"{MIN_FOLLOWERS_FOR_INSIGHTS} followers pour activer les statistiques "
+                f"d'impressions. Utilise le mode Scan rapide en attendant."
+            )
+
         url = f"{GRAPH_URL}/{self.page_id}/posts"
         params = {
             "access_token": self.token,
