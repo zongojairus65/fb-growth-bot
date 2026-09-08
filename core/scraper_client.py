@@ -93,6 +93,14 @@ class ScraperClient:
             "moyenne_commentaires": int(total_comments / n),
         }
 
+    def extract_sample_messages(self, posts: list[dict], limit: int = 8) -> list[str]:
+        """Extrait les vrais textes des posts (pas juste des compteurs),
+        pour que le diagnostic IA se base sur le contenu réel plutôt que
+        de deviner la niche à partir de la bio uniquement — corrige les
+        diagnostics non fiables observés quand seuls les chiffres sont fournis."""
+        messages = [p.get("message", "").strip() for p in posts if p.get("message", "").strip()]
+        return messages[:limit]
+
     def summarize_reels(self, reels: list[dict]) -> dict:
         """Champs confirmés par test réel : video_view_count, reshare_count."""
         if not reels:

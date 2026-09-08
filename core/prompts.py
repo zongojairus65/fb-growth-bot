@@ -4,14 +4,23 @@ en français, injecté avec les variables du profil / des données réelles.
 """
 
 
-def diagnostic_prompt(username: str, niche_hint: str, stats: dict) -> str:
+def diagnostic_prompt(username: str, niche_hint: str, stats: dict, sample_messages: list = None) -> str:
     """Remplace le 'scan IA' de Blow Up, mais basé sur de vraies stats Graph API
-    au lieu d'un modèle propriétaire boîte noire."""
+    au lieu d'un modèle propriétaire boîte noire. Inclut désormais des extraits
+    réels de posts (sample_messages) — sans eux, le modèle devinait la niche à
+    partir de la seule bio, produisant des diagnostics non fondés sur le vrai
+    contenu publié."""
+    messages_section = ""
+    if sample_messages:
+        posts_text = "\n".join(f'- "{m[:200]}"' for m in sample_messages)
+        messages_section = f"\n\nExtraits réels de posts récents (base-toi sur CE contenu pour la niche, pas sur des suppositions) :\n{posts_text}"
+
     return f"""Agis en tant qu'analyste de croissance Facebook.
 Voici les statistiques réelles des 30 derniers posts du compte @{username} :
 {stats}
+{messages_section}
 
-Indice de niche fourni par l'utilisateur : {niche_hint}
+Indice de niche fourni par l'utilisateur (peut être vide ou imprécis) : {niche_hint}
 
 Réponds UNIQUEMENT en JSON avec cette structure exacte :
 {{
@@ -21,6 +30,7 @@ Réponds UNIQUEMENT en JSON avec cette structure exacte :
   "points_forts": ["...", "...", "..."],
   "points_faibles": ["...", "...", "..."]
 }}
+IMPORTANT : la niche_detectee et les hashtags doivent refléter le VRAI contenu des extraits de posts ci-dessus, pas la bio ou des suppositions génériques.
 Chaque point fort/faible doit s'appuyer sur une donnée réelle des stats, pas une généralité.
 Ton direct, familier mais professionnel, comme un coach qui connaît vraiment le compte."""
 

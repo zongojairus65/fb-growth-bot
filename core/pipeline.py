@@ -77,8 +77,9 @@ class GrowthPipeline:
         }
 
         niche_hint = req.niche_hint or self.scraper.extract_niche_hint(details)
+        sample_messages = self.scraper.extract_sample_messages(posts)
 
-        prompt = prompts.diagnostic_prompt(req.fb_username, niche_hint, stats_summary)
+        prompt = prompts.diagnostic_prompt(req.fb_username, niche_hint, stats_summary, sample_messages)
         result = await self._json_with_fallback(prompt, model=MODEL_FLASH_LITE_35)
         return DiagnosticResult(profile_id=req.profile_id, raw_stats=stats_summary, **result)
 
@@ -89,8 +90,9 @@ class GrowthPipeline:
             "nb_posts_analyses": len(posts),
             "moyenne_impressions": await graph.average_reach(),
         }
+        sample_messages = [p.get("message", "").strip() for p in posts if p.get("message", "").strip()][:8]
         label = req.fb_username or req.fb_page_id
-        prompt = prompts.diagnostic_prompt(label, req.niche_hint, stats_summary)
+        prompt = prompts.diagnostic_prompt(label, req.niche_hint, stats_summary, sample_messages)
         result = await self._json_with_fallback(prompt, model=MODEL_FLASH_LITE_35)
         return DiagnosticResult(profile_id=req.profile_id, raw_stats=stats_summary, **result)
 
