@@ -69,7 +69,13 @@ class GrowthPipeline:
 
         details = await self.scraper.fetch_profile_details(profile_id)
         posts = await self.scraper.fetch_public_profile_posts(profile_id)
-        reels = await self.scraper.fetch_profile_reels(profile_id)
+
+        # reels_profile_id diffère parfois du profile_id classique (confirmé
+        # par test réel) — sans ça, fetch_profile_reels renvoyait [] alors
+        # que le compte avait bien des reels publiés. Repli sur profile_id
+        # si le champ est absent (cas où les deux coïncident, ex: Zuckerberg).
+        reels_profile_id = details.get("profile", details).get("reels_profile_id") or profile_id
+        reels = await self.scraper.fetch_profile_reels(reels_profile_id)
 
         stats_summary = {
             **self.scraper.summarize_posts(posts),
