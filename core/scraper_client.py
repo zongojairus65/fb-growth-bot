@@ -4,10 +4,11 @@ sur profils publics, jamais pour la publication.
 
 Endpoints confirmés par test réel :
 - GET /profile/details_url?url=...         -> résout un username en profile_id
-- GET /profile/details_id?profile_id=...   -> bio, catégorie, about_public
+- GET /profile/details_id?profile_id=...   -> bio, catégorie, about_public, reels_profile_id
 - GET /profile/posts?profile_id=...        -> posts publics (results[].reactions_count, comments_count)
-- GET /profile/reels?reels_profile_id=...  -> reels publics — accepte le même ID numérique
-                                               simple que profile_id (confirmé avec =4)
+- GET /profile/reels?reels_profile_id=...  -> reels publics — nécessite le reels_profile_id
+                                               ENCODÉ (différent de profile_id pour la
+                                               plupart des comptes, confirmé par test réel)
 """
 
 import os
@@ -68,8 +69,10 @@ class ScraperClient:
         return data.get("results") or []
 
     async def fetch_profile_reels(self, reels_profile_id: str, limit: int = 20) -> list[dict]:
-        """Confirmé : accepte le même ID numérique simple que profile_id
-        (testé avec reels_profile_id=4)."""
+        """Nécessite le reels_profile_id ENCODÉ (extrait via fetch_profile_details),
+        pas le profile_id numérique simple — confirmé par test réel : sur un compte
+        test, profile_id simple renvoyait [] alors que reels_profile_id encodé
+        renvoyait bien les 10 reels réels du compte."""
         url = f"{self.base_url}/profile/reels"
         params = {"reels_profile_id": reels_profile_id}
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -103,11 +106,14 @@ class ScraperClient:
         return messages[:limit]
 
     def summarize_reels(self, reels: list[dict]) -> dict:
-        """Champs confirmés par test réel : video_view_count, reshare_count."""
+        """Champs confirmés par test réel sur l'endpoint /profile/reels :
+        play_count (PAS video_view_count, qui n'existe que sur /profile/posts
+        pour les vidéos incluses dedans — nom de champ différent selon
+        l'endpoint), reshare_count."""
         if not reels:
             return {"nb_reels_analyses": 0, "moyenne_vues_reels": 0, "moyenne_partages_reels": 0}
 
-        total_views = sum(r.get("video_view_count", 0) for r in reels)
+        total_views = sum(r.get("play_count", 0) for r in reels)
         total_shares = sum(r.get("reshare_count", 0) for r in reels)
         n = len(reels)
         return {
