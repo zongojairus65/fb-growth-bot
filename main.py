@@ -34,7 +34,7 @@ except RuntimeError:
 try:
     mistral = MistralClient()
 except RuntimeError:
-    mistral = None  # repli indisponible si MISTRAL_API_KEY manquant, refine_full fonctionnera sans filet
+    mistral = None
 
 pipeline = GrowthPipeline(gemini, scraper, mistral)
 
@@ -64,8 +64,6 @@ def get_quiz():
 
 @app.post("/onboarding/quiz/answer")
 async def submit_quiz_answer(answer: QuizAnswer):
-    """Sauvegarde réelle en base — chaque réponse alimente ensuite
-    le contexte psychologique utilisé automatiquement par /strategy."""
     try:
         await db.save_quiz_answer(answer.profile_id, answer.question_id, answer.answer)
     except Exception as e:
@@ -75,8 +73,6 @@ async def submit_quiz_answer(answer: QuizAnswer):
 
 @app.get("/onboarding/quiz/context/{profile_id}")
 async def quiz_context(profile_id: int):
-    """Calcule le contexte psychologique à partir des réponses stockées.
-    Utile pour prévisualiser avant de lancer /strategy, ou en debug."""
     reponses = await db.get_quiz_answers(profile_id)
     if not reponses:
         return {"contexte_psy": ""}
@@ -117,10 +113,6 @@ async def projection(profile_id: int, avg_reach: int = 0):
 
 @app.post("/strategy")
 async def strategy(profile_id: int, niche: str, audience: str, objectif: str, contexte_psy: str = ""):
-    """NOTE: profile_id doit correspondre à un profil déjà créé via POST /profile.
-    Si contexte_psy n'est pas fourni explicitement, on va chercher les réponses
-    du quiz déjà stockées pour ce profil et on les transforme en contexte
-    automatiquement — c'est ce qui rend le quiz réellement utile."""
     if not contexte_psy:
         reponses = await db.get_quiz_answers(profile_id)
         if reponses:
@@ -174,6 +166,30 @@ async def refine(profile_id: int, contenu: str, voix: str, audience: str, object
         )
     except Exception as e:
         print(f"[main] Sauvegarde refine ignorée suite à une erreur: {e}")
+    return result
+
+
+@app.post("/video-script")
+async def video_script(profile_id: int, video_url: str, hashtags: str = "", niche_hint: str = "",
+                        vues: int = 0, likes: int = 0, partages: int = 0):
+    """Analyse une vidéo (via son URL directe, ex: browser_native_hd_url du
+    scraper) et génère un script reproductible basé sur son contenu réel +
+    ses statistiques de performance."""
+    stats = {"vues": vues, "likes": likes, "partages": partages}
+    try:
+        result = await pipeline.analyze_video_from_url(video_url, stats, hashtags, niche_hint)
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+
+    try:
+        await db.save_generation(
+            "video_script",
+            {"profile_id": profile_id, "video_url": video_url, "hashtags": hashtags},
+            result,
+        )
+    except Exception as e:
+        print(f"[main] Sauvegarde video_script ignorée suite à une erreur: {e}")
+
     return result
 
 

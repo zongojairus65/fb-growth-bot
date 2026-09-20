@@ -7,7 +7,8 @@ Modèles disponibles, du moins cher au plus capable :
 - "gemini-3.1-flash-lite" -> payant, low-cost ; extraction/classification simple
 - "gemini-3.5-flash-lite" -> payant, low-cost ; meilleur ratio prix/perf que 3.1,
                              confirmé pour l'extraction de données JSON fiable
-- "gemini-3.5-flash"      -> payant, plus cher ; rédaction créative (stratégie/hooks)
+- "gemini-3.5-flash"      -> payant, plus cher ; rédaction créative (stratégie/hooks),
+                             accepte aussi la vidéo en entrée multimodale
 
 Vérifie toujours le nom exact du modèle dans Google AI Studio avant déploiement,
 les noms de modèles évoluent régulièrement.
@@ -110,3 +111,40 @@ class GeminiClient:
             return json.loads(json_str)
         except json.JSONDecodeError as e:
             raise RuntimeError(f"JSON invalide extrait de la réponse Gemini: {e} — contenu: {json_str[:300]}")
+
+    async def generate_from_video(
+        self, video_bytes: bytes, mime_type: str, prompt: str,
+        model: str = MODEL_FLASH_35, max_output_tokens: int = 4096
+    ) -> str:
+        """Envoie une vidéo en entrée multimodale (inline base64). Limite
+        d'environ 19 Mo pour l'inline — au-delà, lève une erreur claire
+        plutôt que d'échouer silencieusement (Files API non implémentée,
+        à ajouter plus tard si des vidéos plus lourdes doivent être supportées)."""
+        import base64
+        if len(video_bytes) > 19_000_000:
+            raise RuntimeError(
+                f"Vidéo trop volumineuse ({len(video_bytes) // 1_000_000} Mo) — "
+                "la limite actuelle est d'environ 19 Mo pour l'analyse vidéo."
+            )
+
+        video_b64 = base64.b64encode(video_bytes).decode("utf-8")
+        url = f"{BASE_URL}/{model}:generateContent?key={self.api_key}"
+        payload = {
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    {"inline_data": {"mime_type": mime_type, "data": video_b64}},
+                    {"text": prompt},
+                ],
+            }],
+            "generationConfig": {"temperature": 0.7, "maxOutputTokens": max_output_tokens},
+        }
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            resp = await client.post(url, json=payload)
+        if resp.status_code != 200:
+            raise RuntimeError(f"Gemini API error {resp.status_code}: {resp.text}")
+        data = resp.json()
+        try:
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError):
+            raise RuntimeError(f"Réponse Gemini inattendue: {data}")

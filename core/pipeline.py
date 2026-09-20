@@ -1,3 +1,4 @@
+import httpx
 from core.gemini_client import GeminiClient, MODEL_FLASH_35, MODEL_FLASH_LITE_35, MODEL_GEMMA_FREE
 from core.mistral_client import MODEL_MISTRAL_SMALL, MODEL_MISTRAL_MEDIUM
 from core import prompts
@@ -70,10 +71,6 @@ class GrowthPipeline:
         details = await self.scraper.fetch_profile_details(profile_id)
         posts = await self.scraper.fetch_public_profile_posts(profile_id)
 
-        # reels_profile_id diffère parfois du profile_id classique (confirmé
-        # par test réel) — sans ça, fetch_profile_reels renvoyait [] alors
-        # que le compte avait bien des reels publiés. Repli sur profile_id
-        # si le champ est absent (cas où les deux coïncident, ex: Zuckerberg).
         reels_profile_id = details.get("profile", details).get("reels_profile_id") or profile_id
         reels = await self.scraper.fetch_profile_reels(reels_profile_id)
 
@@ -112,9 +109,6 @@ class GrowthPipeline:
         return await self.gemini.generate(prompt, model=MODEL_FLASH_LITE_35, temperature=0.6)
 
     async def generate_strategy(self, niche: str, audience: str, objectif: str, contexte_psy: str = "") -> list[dict]:
-        """10 idées détaillées -> sortie volumineuse, d'où max_output_tokens élevé
-        et l'extraction JSON robuste (liste), après avoir eu une réponse tronquée
-        avec la limite par défaut de 4096 tokens."""
         niche_enrichie = f"{niche}\nContexte psychologique du créateur : {contexte_psy}" if contexte_psy else niche
         prompt = prompts.strategy_prompt(niche_enrichie, audience, objectif)
         return await self._json_list_with_fallback(prompt, model=MODEL_FLASH_35, max_output_tokens=8192)
@@ -132,3 +126,26 @@ class GrowthPipeline:
         autorite = await self._text_with_fallback(prompts.authority_prompt(retenu, audience, voix), model=MODEL_FLASH_35)
         final = await self._text_with_fallback(prompts.engagement_amplifier_prompt(autorite, audience, objectif), model=MODEL_FLASH_35)
         return {"retention": retenu, "autorite": autorite, "final": final}
+
+    async def analyze_video_from_url(self, video_url: str, stats: dict, hashtags: str, niche_hint: str = "") -> dict:
+        """Télécharge une vidéo depuis une URL (ex: browser_native_hd_url du
+        scraper) et l'envoie à Gemini en analyse multimodale pour produire
+        un script reproductible. Limite ~19 Mo (voir gemini_client.py)."""
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+            resp = await client.get(video_url)
+        if resp.status_code != 200:
+            raise RuntimeError(f"Échec du téléchargement de la vidéo: HTTP {resp.status_code}")
+
+        video_bytes = resp.content
+        mime_type = resp.headers.get("content-type", "video/mp4")
+
+        prompt = prompts.video_script_prompt(stats, hashtags, niche_hint)
+        raw = await self.gemini.generate_from_video(video_bytes, mime_type, prompt, model=MODEL_FLASH_35)
+
+        import json
+        raw = raw.strip()
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start == -1 or end == -1:
+            raise RuntimeError(f"Aucun JSON trouvé dans l'analyse vidéo: {raw[:300]}")
+        return json.loads(raw[start:end + 1])
